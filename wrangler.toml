@@ -3,8 +3,6 @@ main = "cloudflare-worker/src/index.js"
 compatibility_date = "2026-10-22"
 workers_dev = true
 
-# Create a KV namespace named OTakuSessions and replace the placeholder ID below
-# before deploying, or configure the equivalent binding in the Cloudflare dashboard.
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "39bd4eb954c24a53bd37b48671c6ed28"
