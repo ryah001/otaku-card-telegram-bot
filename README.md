@@ -2,27 +2,31 @@
 
 Telegram companion bot for the [Otaku Card Maker website](https://ryah001.github.io/otaku-card-maker/).
 
-## Status
+## Current status
 
-The bot has a working menu and a guided profile intake flow (name, username, role, short bio, optional WhatsApp number, and color selection). It validates basic input and displays a review summary. It does **not** yet render or send a PNG, fetch live Supabase templates, authenticate/link a website account, assign HUNTER IDs, or write to card history. Those capabilities must be connected to the website's secure backend before being advertised as active.
+- Working `/start`, `/help`, and guided profile intake.
+- Read-only Supabase catalog module added for active `card_templates`, using the public anon key.
+- Docker, Render worker blueprint, and GitHub Actions compile checks.
 
-## Run locally
+**Not implemented yet:** the bot UI integration for template selection, PNG rendering, secure account linking, HUNTER ID assignment, quota enforcement, and site history writes. The bot must not claim to generate or save a card until those pieces are implemented.
+
+## Local setup
 
 1. Install Python 3.11 or newer.
 2. Install dependencies: `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN` locally.
-4. Run `python -m bot`.
+3. Copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN`.
+4. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` to enable catalog integration.
+5. Run `python -m bot`.
 
-Never commit `.env`, Telegram bot tokens, Supabase service-role keys, or OAuth credentials. Configure secrets in your hosting provider's environment settings.
+Never commit `.env`, Telegram bot tokens, Supabase service-role keys, or OAuth credentials. Configure values in your hosting provider's environment settings. Use only the public anon/publishable key; RLS must restrict database reads.
 
 ## Deployment
 
-The repository includes a Dockerfile, a Render worker blueprint, and a GitHub Actions validation workflow. Set `TELEGRAM_BOT_TOKEN` as a Render secret/environment variable before deploying.
+Set `TELEGRAM_BOT_TOKEN`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY` in Render's environment settings. Do not put real values in `render.yaml`.
 
-## Planned integration requirements
+## Required next integration
 
-- Fetch active templates and published layout versions from Supabase.
+- Connect the active template catalog to the Telegram selection flow.
 - Link Telegram users to website accounts using a short-lived, one-time website-generated code; never request Google passwords in Telegram.
 - Reuse the website's actual React card component in a controlled browser renderer for pixel-identical PNGs.
 - Enforce creation limits in a secure backend and keep temporary bot renders separate from `card_history` and the site's storage bucket.
-- Add tests for input validation, authorization, quotas, and rendering before enabling card generation.
