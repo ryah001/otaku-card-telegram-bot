@@ -1,14 +1,15 @@
 """Telegram entry point and guided Otaku card profile flow."""
 import logging
-import re
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from bot.config import configure_logging, load_settings
+from bot.profile_validation import clean_optional_text, normalize_whatsapp
 from bot.supabase_catalog import CatalogUnavailable, fetch_active_templates
 
 logger = logging.getLogger(__name__)
 WEBSITE_URL = "https://ryah001.github.io/otaku-card-maker/"
 COLORS = ["Bleu", "Vert", "Orange", "Violet", "Jaune", "Rouge"]
+
 
 def menu():
     return InlineKeyboardMarkup([
@@ -17,12 +18,15 @@ def menu():
         [InlineKeyboardButton("🌐 Ouvrir le site", url=WEBSITE_URL)],
     ])
 
+
 def cancel_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Annuler", callback_data="home")]])
+
 
 def color_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton(c, callback_data=f"color:{c}")] for c in COLORS] +
                                 [[InlineKeyboardButton("↩️ Annuler", callback_data="home")]])
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -30,20 +34,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Bienvenue dans Otaku Card Maker !\n\nTu peux préparer les informations de ton profil. "
         "La génération PNG et la liaison sécurisée du compte ne sont pas encore activées.", reply_markup=menu())
 
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "Commandes : /start pour le menu, /help pour l’aide, /cancel pour annuler.\n"
         "Le bot ne demandera jamais ton mot de passe Google ni ton identifiant HUNTER.", reply_markup=menu())
 
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.effective_message.reply_text("Création annulée.", reply_markup=menu())
+
 
 async def begin(query, context):
     context.user_data.clear()
     context.user_data["profile"] = {}
     context.user_data["step"] = "name"
     await query.edit_message_text("🎴 Étape 1/5 — Quel nom veux-tu afficher ? Envoie-le ici. (/cancel pour arrêter)")
+
 
 async def show_templates(query):
     try:
@@ -59,6 +67,7 @@ async def show_templates(query):
     text = "🎨 Modèles actuellement actifs sur le site :\n\n" + "\n".join("• " + t["label"] for t in templates)
     await query.edit_message_text(text, reply_markup=cancel_keyboard())
 
+
 async def show_review(query, context):
     p = context.user_data.get("profile", {})
     text = ("🔎 Récapitulatif du profil\n\n"
@@ -71,6 +80,7 @@ async def show_review(query, context):
         [InlineKeyboardButton("🔄 Recommencer", callback_data="create")],
         [InlineKeyboardButton("↩️ Menu", callback_data="home")],
     ]))
+
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -100,6 +110,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("↩️ Menu", callback_data="home")],
             ]))
 
+
 async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("step")
     p = context.user_data.get("profile")
@@ -108,6 +119,7 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     value = m.text.strip()
     if step == "name":
+        value = clean_optional_text(value, max_length=50)
         if not 2 <= len(value) <= 50:
             await m.reply_text("Le nom doit contenir entre 2 et 50 caractères.")
             return
@@ -115,21 +127,21 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "username"
         await m.reply_text("Étape 2/5 — Ton pseudo, ou — pour ignorer.")
     elif step == "username":
-        p["username"] = "" if value == "—" else value[:40]
+        p["username"] = "" if value == "—" else clean_optional_text(value, max_length=40)
         context.user_data["step"] = "role"
         await m.reply_text("Étape 3/5 — Ton rôle/titre, ou — pour ignorer.")
     elif step == "role":
-        p["role"] = "" if value == "—" else value[:60]
+        p["role"] = "" if value == "—" else clean_optional_text(value, max_length=60)
         context.user_data["step"] = "bio"
         await m.reply_text("Étape 4/5 — Courte description, ou — pour ignorer.")
     elif step == "bio":
-        p["bio"] = "" if value == "—" else value[:180]
+        p["bio"] = "" if value == "—" else clean_optional_text(value, max_length=180)
         context.user_data["step"] = "whatsapp"
         await m.reply_text("Étape 5/5 — Numéro WhatsApp international, ou — pour ignorer.")
     elif step == "whatsapp":
         if value != "—":
-            digits = re.sub(r"\D", "", value)
-            if not 8 <= len(digits) <= 15:
+            digits = normalize_whatsapp(value)
+            if digits is None:
                 await m.reply_text("Numéro invalide. Envoie l’indicatif international ou —.")
                 return
             p["whatsapp"] = digits
@@ -137,6 +149,7 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p["whatsapp"] = ""
         context.user_data.pop("step", None)
         await m.reply_text("Choisis une couleur :", reply_markup=color_keyboard())
+
 
 def build_application():
     settings = load_settings()
@@ -149,10 +162,12 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect_text))
     return app
 
+
 def main():
     app = build_application()
     logger.info("Starting Otaku Card Telegram bot")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
