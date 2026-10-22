@@ -104,7 +104,7 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("step")
     p = context.user_data.get("profile")
     m = update.effective_message
-    if not step or p is None or not m or not m.text:
+    if not step or p is None or m is None or not m.text:
         return
     value = m.text.strip()
     if step == "name":
@@ -128,7 +128,7 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await m.reply_text("Étape 5/5 — Numéro WhatsApp international, ou — pour ignorer.")
     elif step == "whatsapp":
         if value != "—":
-            digits = re.sub(r"\\D", "", value)
+            digits = re.sub(r"\D", "", value)
             if not 8 <= len(digits) <= 15:
                 await m.reply_text("Numéro invalide. Envoie l’indicatif international ou —.")
                 return
