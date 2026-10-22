@@ -57,7 +57,7 @@ jobs:
       - name: Serve renderer and verify PNG output
         working-directory: website
         run: |
-          npx vite preview --host 127.0.0.1 --port 4173 --strictPort > /tmp/renderer-vite.log 2>&1 &
+          npx vite preview --config vite.renderer.config.mjs --host 127.0.0.1 --port 4173 --strictPort > /tmp/renderer-vite.log 2>&1 &
           echo $! > /tmp/renderer-vite.pid
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/renderer.html >/dev/null && break; sleep 2; done
           node screenshot.mjs
