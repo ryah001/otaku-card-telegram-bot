@@ -185,7 +185,8 @@ async function handleMessage(env, message) {
   const chatId = message.chat?.id;
   if (!chatId) return;
   const text = (message.text || "").trim();
-  if (!text) return;
+  const photo = Array.isArray(message.photo) && message.photo.length ? message.photo[message.photo.length - 1] : null;
+  if (!text && !photo) return;
   if (text === "/start" || text === "/help") {
     await clearState(env, chatId);
     await send(env, chatId,
@@ -218,42 +219,50 @@ async function handleMessage(env, message) {
   }
   const p = state.profile || {};
   const value = text.slice(0, 180);
+  if (state.step === "photo") {
+    if (photo) p.photo_file_id = photo.file_id;
+    else if (text !== "—") {
+      await send(env, chatId, "Envoie une photo de profil ou réponds — pour continuer sans photo.");
+      return;
+    }
+    state.profile = p; state.step = "color";
+    await putState(env, chatId, state);
+    await send(env, chatId, "Choisis la couleur de ta carte :", colorKeyboard());
+    return;
+  }
+  if (photo) {
+    await send(env, chatId, "Pour ajouter une photo, suis d’abord les étapes du formulaire. Utilise /start pour recommencer.");
+    return;
+  }
   switch (state.step) {
     case "name":
       if (value.length < 2 || value.length > 50) {
-        await send(env, chatId, "Le nom doit contenir entre 2 et 50 caractères.");
+        await send(env, chatId, "Le nom réel doit contenir entre 2 et 50 caractères.");
         return;
       }
       p.name = value; state.step = "username";
-      await send(env, chatId, "Étape 2/5 — Ton pseudo, ou — pour ignorer.");
+      await send(env, chatId, "Étape 2/6 — Ton pseudo Otaku (40 caractères max), ou — pour ignorer.");
       break;
     case "username":
-      p.username = value === "—" ? "" : value.slice(0, 40); state.step = "role";
-      await send(env, chatId, "Étape 3/5 — Ton rôle/titre, ou — pour ignorer.");
+      p.username = value === "—" ? "" : value.slice(0, 40); state.step = "nationality";
+      await send(env, chatId, "Étape 3/6 — Ta nationalité (ex. Congolaise), ou — pour ignorer.");
       break;
-    case "role":
-      p.role = value === "—" ? "" : value.slice(0, 60); state.step = "bio";
-      await send(env, chatId, "Étape 4/5 — Courte description, ou — pour ignorer.");
+    case "nationality":
+      p.nationality = value === "—" ? "" : value.slice(0, 50); state.step = "status";
+      await send(env, chatId, "Étape 4/6 — Ton statut/titre sur la carte, ou — pour ignorer.");
       break;
-    case "bio":
-      p.bio = value === "—" ? "" : value.slice(0, 180); state.step = "whatsapp";
-      await send(env, chatId, "Étape 5/5 — Numéro WhatsApp international, ou — pour ignorer.");
+    case "status":
+      p.status = value === "—" ? "" : value.slice(0, 60); state.step = "genre";
+      await send(env, chatId, "Étape 5/6 — Ton genre/profil Otaku, ou — pour ignorer.");
       break;
-    case "whatsapp": {
-      if (value === "—") p.whatsapp = "";
-      else {
-        const digits = value.replace(/\D/g, "");
-        if (digits.length < 8 || digits.length > 15) {
-          await send(env, chatId, "Numéro invalide. Envoie l’indicatif international ou —.");
-          return;
-        }
-        p.whatsapp = digits;
-      }
-      state.profile = p; state.step = "color";
-      await putState(env, chatId, state);
-      await send(env, chatId, "Choisis une couleur :", colorKeyboard());
-      return;
-    }
+    case "genre":
+      p.genre = value === "—" ? "" : value.slice(0, 60); state.step = "quote";
+      await send(env, chatId, "Étape 6/6 — Ta citation (jusqu’à 2 lignes), ou — pour ignorer.");
+      break;
+    case "quote":
+      p.quote = value === "—" ? "" : value.slice(0, 100); state.step = "photo";
+      await send(env, chatId, "Envoie maintenant ta photo de profil comme image, ou réponds — pour continuer sans photo.");
+      break;
     default:
       await send(env, chatId, "Utilise /start pour ouvrir le menu.", menu());
       return;
@@ -278,7 +287,7 @@ async function handleCallback(env, callback) {
     await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "🔐 Liaison de compte", reply_markup: homeKeyboard() });
   } else if (data === "create") {
     await putState(env, chatId, { step: "name", profile: {} });
-    await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "🎴 Étape 1/5 — Quel nom veux-tu afficher ? Envoie-le ici. (/cancel pour arrêter)" });
+    await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "🎴 Étape 1/6 — Quel est ton nom réel ? Envoie-le ici. (/cancel pour arrêter)" });
   } else if (data.startsWith("color:")) {
     const state = await getState(env, chatId);
     if (state.step !== "color" || !state.profile) {
@@ -293,7 +302,7 @@ async function handleCallback(env, callback) {
     const p = state.profile;
     await telegram(env, "editMessageText", {
       chat_id: chatId, message_id: messageId,
-      text: `🔎 Récapitulatif du profil\n\nNom : ${p.name}\nPseudo : ${p.username || "Non renseigné"}\nRôle : ${p.role || "Non renseigné"}\nDescription : ${p.bio || "Non renseignée"}\nWhatsApp : ${p.whatsapp || "Non renseigné"}\nCouleur : ${p.color}\n\nAucune image n’a été générée et rien n’a été enregistré sur le site.`,
+      text: `🔎 Récapitulatif de ta carte\n\nPseudo : ${p.username || "Non renseigné"}\nNom réel : ${p.name}\nNationalité : ${p.nationality || "Non renseignée"}\nStatut : ${p.status || "Non renseigné"}\nGenre : ${p.genre || "Non renseigné"}\nCitation : ${p.quote || "Non renseignée"}\nPhoto : ${p.photo_file_id ? "Ajoutée" : "Aucune"}\nCouleur : ${p.color}\n\n⚠️ La génération PNG n’est pas encore activée dans cette version. Aucune carte ni donnée n’est enregistrée dans l’historique du site.`,
       reply_markup: { inline_keyboard: [
         [{ text: "✅ Confirmer le profil", callback_data: "confirm" }],
         [{ text: "🔄 Recommencer", callback_data: "create" }],
@@ -303,7 +312,7 @@ async function handleCallback(env, callback) {
   } else if (data === "confirm") {
     await telegram(env, "editMessageText", {
       chat_id: chatId, message_id: messageId,
-      text: "✅ Profil préparé. La génération PNG et l’historique ne sont pas encore activés. Rien n’a été enregistré dans l’historique.",
+      text: "✅ Profil confirmé. La génération et l’envoi PNG ne sont pas encore implémentés dans cette version. Aucune carte n’a été enregistrée sur le site.",
       reply_markup: { inline_keyboard: [
         [{ text: "🌐 Ouvrir le site", url: "https://ryah001.github.io/otaku-card-maker/" }],
         [{ text: "🎴 Nouveau profil", callback_data: "create" }],
