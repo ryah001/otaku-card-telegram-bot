@@ -1,0 +1,59 @@
+name: Official card renderer check
+
+on:
+  pull_request:
+  push:
+    branches: [main, feature/profile-validation-tests]
+
+permissions:
+  contents: read
+
+jobs:
+  render-official-component:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bot repository
+        uses: actions/checkout@v4
+      - name: Checkout website source at verified commit
+        uses: actions/checkout@v4
+        with:
+          repository: ryah001/otaku-card-maker
+          ref: 323c485430c9acae5d3cae033a72da67cb58e937
+          path: website
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install website dependencies
+        working-directory: website
+        run: npm install --no-audit --no-fund
+      - name: Install Playwright and Chromium
+        working-directory: website
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+      - name: Copy isolated renderer harness
+        run: |
+          cp renderer/renderer.html website/renderer.html
+          cp renderer/renderer.jsx website/renderer.jsx
+          cp renderer/renderer.css website/renderer.css
+          cp renderer/screenshot.mjs website/screenshot.mjs
+      - name: Build website with isolated renderer entry
+        working-directory: website
+        run: npx vite build --outDir dist-renderer --emptyOutDir --rollupOptions.input=renderer.html
+      - name: Serve renderer and verify PNG output
+        working-directory: website
+        run: |
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort > /tmp/renderer-vite.log 2>&1 &
+          echo $! > /tmp/renderer-vite.pid
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/renderer.html >/dev/null && break; sleep 2; done
+          node screenshot.mjs
+          file /tmp/otaku-card-render.png
+          test "$(stat -c%s /tmp/otaku-card-render.png)" -gt 10000
+      - name: Upload rendered PNG for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-otaku-card-render
+          path: /tmp/otaku-card-render.png
+          if-no-files-found: error
+          retention-days: 7
