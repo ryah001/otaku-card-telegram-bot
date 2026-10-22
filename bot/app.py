@@ -8,7 +8,6 @@ from bot.supabase_catalog import CatalogUnavailable, fetch_active_templates
 
 logger = logging.getLogger(__name__)
 WEBSITE_URL = "https://ryah001.github.io/otaku-card-maker/"
-COLORS = ["Bleu", "Vert", "Orange", "Violet", "Jaune", "Rouge"]
 
 
 def menu():
@@ -20,12 +19,14 @@ def menu():
 
 
 def cancel_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Annuler", callback_data="home")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Menu", callback_data="home")]])
 
 
-def color_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton(c, callback_data=f"color:{c}")] for c in COLORS] +
-                                [[InlineKeyboardButton("↩️ Annuler", callback_data="home")]])
+def template_keyboard(templates):
+    buttons = [[InlineKeyboardButton(t["label"], callback_data=f"template:{t['template_key']}")]
+               for t in templates]
+    buttons.append([InlineKeyboardButton("↩️ Annuler", callback_data="home")])
+    return InlineKeyboardMarkup(buttons)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,16 +54,20 @@ async def begin(query, context):
     await query.edit_message_text("🎴 Étape 1/5 — Quel nom veux-tu afficher ? Envoie-le ici. (/cancel pour arrêter)")
 
 
-async def show_templates(query):
+async def show_templates(query, *, for_selection=False, context=None):
     try:
         templates = await fetch_active_templates()
     except CatalogUnavailable:
         await query.edit_message_text(
-            "Le catalogue en direct n’est pas disponible. Configure SUPABASE_URL et SUPABASE_ANON_KEY (clé publique uniquement) dans l’hébergement.",
+            "Le catalogue en direct n’est pas disponible. Vérifie la configuration Supabase côté hébergement.",
             reply_markup=cancel_keyboard())
         return
     if not templates:
         await query.edit_message_text("Aucun modèle actif n’est disponible.", reply_markup=cancel_keyboard())
+        return
+    if for_selection:
+        context.user_data["available_template_keys"] = [t["template_key"] for t in templates]
+        await query.edit_message_text("🎨 Choisis un modèle actif pour ta carte :", reply_markup=template_keyboard(templates))
         return
     text = "🎨 Modèles actuellement actifs sur le site :\n\n" + "\n".join("• " + t["label"] for t in templates)
     await query.edit_message_text(text, reply_markup=cancel_keyboard())
@@ -73,7 +78,7 @@ async def show_review(query, context):
     text = ("🔎 Récapitulatif du profil\n\n"
             f"Nom : {p.get('name', '—')}\nPseudo : {p.get('username') or 'Non renseigné'}\n"
             f"Rôle : {p.get('role') or 'Non renseigné'}\nDescription : {p.get('bio') or 'Non renseignée'}\n"
-            f"WhatsApp : {p.get('whatsapp') or 'Non renseigné'}\nCouleur : {p.get('color', '—')}\n\n"
+            f"WhatsApp : {p.get('whatsapp') or 'Non renseigné'}\nModèle : {p.get('template_label', '—')}\n\n"
             "Le profil est préparé, mais aucune image n’a été générée et rien n’a été enregistré sur le site.")
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirmer le profil", callback_data="confirm")],
@@ -93,13 +98,28 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await begin(q, context)
     elif data == "templates":
         await show_templates(q)
-    elif data.startswith("color:"):
-        p = context.user_data.get("profile")
-        color = data.split(":", 1)[1]
-        if not p or color not in COLORS:
+    elif data == "choose_template":
+        if not context.user_data.get("profile"):
             await q.edit_message_text("Session expirée. Relance /start.", reply_markup=menu())
             return
-        p["color"] = color
+        await show_templates(q, for_selection=True, context=context)
+    elif data.startswith("template:"):
+        profile = context.user_data.get("profile")
+        template_key = data.split(":", 1)[1]
+        if not profile or template_key not in context.user_data.get("available_template_keys", []):
+            await q.edit_message_text("Ce modèle n’est plus disponible. Recommence la sélection.", reply_markup=menu())
+            return
+        try:
+            templates = await fetch_active_templates()
+        except CatalogUnavailable:
+            await q.edit_message_text("Impossible de vérifier le catalogue. Réessaie plus tard.", reply_markup=menu())
+            return
+        selected = next((t for t in templates if t["template_key"] == template_key), None)
+        if selected is None:
+            await q.edit_message_text("Ce modèle n’est plus actif. Choisis-en un autre.", reply_markup=menu())
+            return
+        profile["template_key"] = selected["template_key"]
+        profile["template_label"] = selected["label"]
         await show_review(q, context)
     elif data == "confirm":
         await q.edit_message_text(
@@ -148,7 +168,20 @@ async def collect_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             p["whatsapp"] = ""
         context.user_data.pop("step", None)
-        await m.reply_text("Choisis une couleur :", reply_markup=color_keyboard())
+        await show_templates_from_message(m, context)
+
+
+async def show_templates_from_message(message, context):
+    try:
+        templates = await fetch_active_templates()
+    except CatalogUnavailable:
+        await message.reply_text("Le catalogue en direct n’est pas disponible. Réessaie plus tard.", reply_markup=menu())
+        return
+    if not templates:
+        await message.reply_text("Aucun modèle actif n’est disponible pour le moment.", reply_markup=menu())
+        return
+    context.user_data["available_template_keys"] = [t["template_key"] for t in templates]
+    await message.reply_text("🎨 Choisis un modèle actif pour ta carte :", reply_markup=template_keyboard(templates))
 
 
 def build_application():
