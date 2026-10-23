@@ -1,0 +1,16 @@
+{
+  "name": "otaku-card-telegram-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:worker": "node --check cloudflare-worker/src/index.js && node --check cloudflare-worker/src/card-renderer.js",
+    "deploy:worker": "wrangler deploy --config wrangler.toml",
+    "dry-run:worker": "wrangler deploy --config wrangler.toml --dry-run --outdir=/tmp/otaku-card-worker-dist"
+  },
+  "dependencies": {
+    "@resvg/resvg-wasm": "^2.6.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
