@@ -29,6 +29,8 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing repository secret: CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing repository secret: CLOUDFLARE_ACCOUNT_ID"; exit 1; }
       - uses: actions/checkout@v4
+        with:
+          ref: feature/cloudflare-webhook-adapter
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
