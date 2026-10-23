@@ -1,3 +1,5 @@
+import { renderCard } from "./card-renderer.js";
+
 const API = "https://api.telegram.org";
 
 function json(data, status = 200) {
@@ -26,6 +28,20 @@ async function send(env, chatId, text, reply_markup) {
     text,
     ...(reply_markup ? { reply_markup } : {}),
   });
+}
+
+async function sendPhoto(env, chatId, png, caption) {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  form.set("caption", String(caption || "").slice(0, 1024));
+  form.set("photo", new Blob([png], { type: "image/png" }), "carte-otaku.png");
+  const response = await fetch(`${API}/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, { method: "POST", body: form });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    console.error("Telegram sendPhoto failed", response.status);
+    throw new Error("Telegram photo delivery failed");
+  }
+  return result;
 }
 
 function menu() {
@@ -190,7 +206,7 @@ async function handleMessage(env, message) {
   if (text === "/start" || text === "/help") {
     await clearState(env, chatId);
     await send(env, chatId,
-      "👋 Bienvenue dans Otaku Card Maker !\n\nTu peux préparer les informations de ton profil et lier ton compte du site avec /connect. La génération PNG n’est pas encore activée dans cette version Cloudflare.",
+      "👋 Bienvenue dans Otaku Card Maker !\n\nTu peux créer une carte Otaku en remplissant ton profil étape par étape, puis confirmer pour recevoir ta carte PNG ici dans Telegram. Tu peux aussi lier ton compte du site avec /connect.",
       menu());
     return;
   }
@@ -220,8 +236,12 @@ async function handleMessage(env, message) {
   const p = state.profile || {};
   const value = text.slice(0, 180);
   if (state.step === "photo") {
-    if (photo) p.photo_file_id = photo.file_id;
-    else if (text !== "—") {
+    if (photo) {
+      p.photo_file_id = photo.file_id;
+      const fileInfo = await telegram(env, "getFile", { file_id: photo.file_id });
+      const filePath = fileInfo.result?.file_path;
+      if (filePath) p.photo_url = `${API}/file/bot${env.TELEGRAM_BOT_TOKEN}/${filePath}`;
+    } else if (text !== "—") {
       await send(env, chatId, "Envoie une photo de profil ou réponds — pour continuer sans photo.");
       return;
     }
@@ -302,7 +322,7 @@ async function handleCallback(env, callback) {
     const p = state.profile;
     await telegram(env, "editMessageText", {
       chat_id: chatId, message_id: messageId,
-      text: `🔎 Récapitulatif de ta carte\n\nPseudo : ${p.username || "Non renseigné"}\nNom réel : ${p.name}\nNationalité : ${p.nationality || "Non renseignée"}\nStatut : ${p.status || "Non renseigné"}\nGenre : ${p.genre || "Non renseigné"}\nCitation : ${p.quote || "Non renseignée"}\nPhoto : ${p.photo_file_id ? "Ajoutée" : "Aucune"}\nCouleur : ${p.color}\n\n⚠️ La génération PNG n’est pas encore activée dans cette version. Aucune carte ni donnée n’est enregistrée dans l’historique du site.`,
+      text: `🔎 Récapitulatif de ta carte\n\nPseudo : ${p.username || "Non renseigné"}\nNom réel : ${p.name}\nNationalité : ${p.nationality || "Non renseignée"}\nStatut : ${p.status || "Non renseigné"}\nGenre : ${p.genre || "Non renseigné"}\nCitation : ${p.quote || "Non renseignée"}\nPhoto : ${p.photo_file_id ? "Ajoutée" : "Aucune"}\nCouleur : ${p.color}\n\nLa carte sera générée et envoyée ici après confirmation. Elle ne sera pas ajoutée à l’historique du site.`,
       reply_markup: { inline_keyboard: [
         [{ text: "✅ Confirmer le profil", callback_data: "confirm" }],
         [{ text: "🔄 Recommencer", callback_data: "create" }],
@@ -310,15 +330,35 @@ async function handleCallback(env, callback) {
       ] },
     });
   } else if (data === "confirm") {
-    await telegram(env, "editMessageText", {
-      chat_id: chatId, message_id: messageId,
-      text: "✅ Profil confirmé. La génération et l’envoi PNG ne sont pas encore implémentés dans cette version. Aucune carte n’a été enregistrée sur le site.",
-      reply_markup: { inline_keyboard: [
-        [{ text: "🌐 Ouvrir le site", url: "https://ryah001.github.io/otaku-card-maker/" }],
-        [{ text: "🎴 Nouveau profil", callback_data: "create" }],
-        [{ text: "↩️ Menu", callback_data: "home" }],
-      ] },
-    });
+    const state = await getState(env, chatId);
+    if (state.step !== "review" || !state.profile) {
+      await send(env, chatId, "Cette session a expiré. Relance /start pour créer une nouvelle carte.", menu());
+      return;
+    }
+    try {
+      await telegram(env, "editMessageText", {
+        chat_id: chatId, message_id: messageId,
+        text: "⏳ Génération de ta carte Otaku en cours…",
+      });
+      const png = await renderCard(state.profile);
+      const caption = "🎴 Ta Carte Otaku est prête !\n\nCréée avec HUNTERS ANIMES • La chasse est ouverte.\nCette carte est envoyée dans Telegram et n’est pas enregistrée dans l’historique du site.";
+      await sendPhoto(env, chatId, png, caption);
+      await clearState(env, chatId);
+      await send(env, chatId, "✅ Carte générée et envoyée !", {
+        inline_keyboard: [
+          [{ text: "🎴 Créer une autre carte", callback_data: "create" }],
+          [{ text: "↩️ Menu", callback_data: "home" }],
+        ],
+      });
+    } catch (error) {
+      console.error("Card generation failed", error instanceof Error ? error.message : "unknown error");
+      await send(env, chatId, "❌ Je n’ai pas pu générer ou envoyer la carte cette fois. Ton profil est conservé pendant 24 h : appuie à nouveau sur « Confirmer le profil » pour réessayer.", {
+        inline_keyboard: [
+          [{ text: "✅ Réessayer", callback_data: "confirm" }],
+          [{ text: "↩️ Menu", callback_data: "home" }],
+        ],
+      });
+    }
   }
 }
 
