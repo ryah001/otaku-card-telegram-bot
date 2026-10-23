@@ -3,6 +3,14 @@ main = "cloudflare-worker/src/index.js"
 compatibility_date = "2026-10-22"
 workers_dev = true
 
+[vars]
+SUPABASE_URL = "https://ydrxhyoxvxmtddvlbnbq.supabase.co"
+
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "39bd4eb954c24a53bd37b48671c6ed28"
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
