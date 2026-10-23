@@ -5,16 +5,19 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  syntax:
+  syntax-and-bundle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install Worker dependencies
+        working-directory: cloudflare-worker
+        run: npm install --no-audit --no-fund
       - name: Check Worker JavaScript syntax
-        run: node --check cloudflare-worker/src/index.js
-      - name: Check deployment configuration
-        run: |
-          test -f wrangler.toml
-          grep -q 'main = "cloudflare-worker/src/index.js"' wrangler.toml
+        working-directory: cloudflare-worker
+        run: npm run check
+      - name: Validate Cloudflare bundle
+        working-directory: cloudflare-worker
+        run: npx wrangler deploy --dry-run --outdir=/tmp/otaku-card-worker-dist
