@@ -1,0 +1,14 @@
+{
+  "name": "otaku-card-telegram-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/card-renderer.js"
+  },
+  "dependencies": {
+    "@resvg/resvg-wasm": "^2.6.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
