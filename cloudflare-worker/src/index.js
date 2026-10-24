@@ -47,7 +47,6 @@ async function sendPhoto(env, chatId, png, caption) {
 function menu() {
   return { inline_keyboard: [
     [{ text: "🎴 Créer ma carte", callback_data: "create" }],
-    [{ text: "🔐 Lier mon compte du site", callback_data: "connect" }],
     [{ text: "🎨 Modèles actifs", callback_data: "templates" }],
     [{ text: "🌐 Ouvrir le site", url: "https://ryah001.github.io/otaku-card-maker/" }],
   ] };
@@ -74,127 +73,9 @@ async function clearState(env, chatId) {
   if (env.SESSIONS) await env.SESSIONS.delete(`chat:${chatId}`);
 }
 
-async function startConnect(env, chatId) {
-  const linked = await env.SESSIONS.get(`telegram-link:${chatId}`, "json");
-  if (linked?.user_id) {
-    await send(env, chatId, "🔐 Ce compte Telegram est déjà lié à un compte Carte Otaku. Pour éviter une association accidentelle, la liaison existante n’est pas remplacée automatiquement.", menu());
-    return;
-  }
-  await putState(env, chatId, { step: "connect_email", connect: { started_at: Date.now(), attempts: 0 } });
-  await send(env, chatId, "🔐 Liaison sécurisée du compte\n\nEnvoie l’adresse e-mail déjà utilisée pour te connecter au site Carte Otaku. Je t’enverrai un code de vérification par e-mail.\n\nN’envoie jamais ton mot de passe. Utilise /cancel pour arrêter.");
-}
-
-async function requestEmailOtp(env, chatId, email) {
-  const state = await getState(env, chatId);
-  const now = Date.now();
-  const previous = await env.SESSIONS.get(`otp-rate:${chatId}`, "json");
-  if (previous?.sent_at && now - previous.sent_at < 60000) {
-    await send(env, chatId, "Attends une minute avant de demander un nouveau code.");
-    return;
-  }
-  const url = (env.SUPABASE_URL || "").replace(/\/$/, "");
-  const key = env.SUPABASE_ANON_KEY || "";
-  if (!url.startsWith("https://") || !key) {
-    await send(env, chatId, "La liaison de compte n’est pas configurée correctement. Réessaie plus tard.", menu());
-    return;
-  }
-  const response = await fetch(`${url}/auth/v1/otp`, {
-    method: "POST",
-    headers: { "content-type": "application/json", apikey: key },
-    body: JSON.stringify({ email, create_user: false }),
-  });
-  if (!response.ok) {
-    console.error("Supabase OTP request failed", response.status);
-    await send(env, chatId, "Impossible d’envoyer le code. Vérifie que cette adresse correspond à un compte existant du site et que la connexion par code e-mail est activée, puis réessaie plus tard.");
-    return;
-  }
-  await env.SESSIONS.put(`otp-rate:${chatId}`, JSON.stringify({ sent_at: now }), { expirationTtl: 600 });
-  await putState(env, chatId, { step: "connect_otp", connect: { email, attempts: 0, requested_at: now } });
-  await send(env, chatId, "📩 Si cette adresse correspond à un compte existant et que les codes e-mail sont activés, un code vient d’être envoyé. Saisis le code reçu ici. Il expirera selon les paramètres Supabase. Ne le partage avec personne.\n\nTu peux utiliser /cancel pour arrêter.");
-}
-
-async function verifyEmailOtp(env, chatId, code) {
-  const state = await getState(env, chatId);
-  const c = state.connect || {};
-  if (state.step !== "connect_otp" || !c.email) {
-    await send(env, chatId, "Aucune vérification en cours. Lance /connect pour commencer.");
-    return;
-  }
-  const attempts = Number(c.attempts || 0) + 1;
-  if (attempts > 5) {
-    await clearState(env, chatId);
-    await send(env, chatId, "Trop de tentatives. Relance /connect dans quelques minutes.", menu());
-    return;
-  }
-  if (!/^[0-9]{6,8}$/.test(code)) {
-    c.attempts = attempts;
-    state.connect = c;
-    await putState(env, chatId, state);
-    await send(env, chatId, "Le code doit contenir 6 à 8 chiffres. Réessaie ou utilise /cancel.");
-    return;
-  }
-  const url = (env.SUPABASE_URL || "").replace(/\/$/, "");
-  const key = env.SUPABASE_ANON_KEY || "";
-  const response = await fetch(`${url}/auth/v1/verify`, {
-    method: "POST",
-    headers: { "content-type": "application/json", apikey: key },
-    body: JSON.stringify({ type: "email", email: c.email, token: code }),
-  });
-  if (!response.ok) {
-    console.error("Supabase OTP verification failed", response.status);
-    c.attempts = attempts;
-    state.connect = c;
-    await putState(env, chatId, state);
-    await send(env, chatId, attempts >= 5 ? "Vérification échouée. Relance /connect pour recommencer." : "Code incorrect ou expiré. Vérifie l’e-mail et réessaie.");
-    if (attempts >= 5) await clearState(env, chatId);
-    return;
-  }
-  const auth = await response.json();
-  const userId = auth.user?.id;
-  if (!userId) {
-    await clearState(env, chatId);
-    await send(env, chatId, "La vérification n’a pas renvoyé de compte valide. Réessaie plus tard.", menu());
-    return;
-  }
-  const existing = await env.SESSIONS.get(`user-link:${userId}`, "json");
-  if (existing?.chat_id && String(existing.chat_id) !== String(chatId)) {
-    await clearState(env, chatId);
-    await send(env, chatId, "Ce compte du site est déjà associé à un autre compte Telegram. Contacte l’assistance HUNTERS ANIMES si tu penses qu’il s’agit d’une erreur.", menu());
-    return;
-  }
-  const record = { user_id: userId, linked_at: new Date().toISOString() };
-  await env.SESSIONS.put(`telegram-link:${chatId}`, JSON.stringify(record));
-  await env.SESSIONS.put(`user-link:${userId}`, JSON.stringify({ chat_id: String(chatId), linked_at: record.linked_at }));
-  await clearState(env, chatId);
-  await send(env, chatId, "✅ Ton compte Carte Otaku a été vérifié et lié à ce compte Telegram.\n\nPour le moment, cette liaison est stockée dans Cloudflare KV ; aucune carte n’a été créée et aucun historique du site n’a été modifié.", menu());
-}
-
 async function templates(env, chatId) {
-  const url = (env.SUPABASE_URL || "").replace(/\/$/, "");
-  const key = env.SUPABASE_ANON_KEY || "";
-  if (!url.startsWith("https://") || !key) {
-    await send(env, chatId, "Le catalogue n’est pas encore configuré. Réessaie plus tard.", homeKeyboard());
-    return;
-  }
-  const query = new URLSearchParams({
-    select: "id,template_key,label,asset_path",
-    is_active: "eq.true",
-    order: "label.asc",
-    limit: "40",
-  });
-  const response = await fetch(`${url}/rest/v1/card_templates?${query}`, {
-    headers: { apikey: key, Authorization: `Bearer ${key}` },
-  });
-  if (!response.ok) {
-    console.error("Supabase catalog request failed", response.status);
-    await send(env, chatId, "Le catalogue est temporairement indisponible.", homeKeyboard());
-    return;
-  }
-  const rows = await response.json();
-  const labels = Array.isArray(rows) ? rows.map((row) => String(row.label || row.template_key || "").trim()).filter(Boolean) : [];
-  await send(env, chatId, labels.length
-    ? "🎨 Modèles actifs sur le site :\n\n" + labels.map((label) => "• " + label).join("\n")
-    : "Aucun modèle actif n’est disponible.", homeKeyboard());
+  const labels = ["Bleu", "Vert", "Orange", "Violet", "Jaune", "Rouge"];
+  await send(env, chatId, "🎨 Couleurs disponibles :\\n\\n" + labels.map((label) => "• " + label).join("\\n"), homeKeyboard());
 }
 
 async function handleMessage(env, message) {
@@ -206,12 +87,8 @@ async function handleMessage(env, message) {
   if (text === "/start" || text === "/help") {
     await clearState(env, chatId);
     await send(env, chatId,
-      "👋 Bienvenue dans Otaku Card Maker !\n\nTu peux créer une carte Otaku en remplissant ton profil étape par étape, puis confirmer pour recevoir ta carte PNG ici dans Telegram. Tu peux aussi lier ton compte du site avec /connect.",
+      "👋 Bienvenue dans Otaku Card Maker !\n\nTu peux créer une carte Otaku en remplissant ton profil étape par étape, puis confirmer pour recevoir ta carte PNG ici dans Telegram. Choisis « Créer ma carte » pour commencer.",
       menu());
-    return;
-  }
-  if (text === "/connect") {
-    await startConnect(env, chatId);
     return;
   }
   if (text === "/cancel") {
@@ -220,19 +97,6 @@ async function handleMessage(env, message) {
     return;
   }
   const state = await getState(env, chatId);
-  if (state.step === "connect_email") {
-    const email = text.toLowerCase();
-    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      await send(env, chatId, "Cette adresse e-mail ne semble pas valide. Réessaie ou utilise /cancel.");
-      return;
-    }
-    await requestEmailOtp(env, chatId, email);
-    return;
-  }
-  if (state.step === "connect_otp") {
-    await verifyEmailOtp(env, chatId, text);
-    return;
-  }
   const p = state.profile || {};
   const value = text.slice(0, 180);
   if (state.step === "photo") {
@@ -302,9 +166,6 @@ async function handleCallback(env, callback) {
     await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "Menu principal :", reply_markup: menu() });
   } else if (data === "templates") {
     await templates(env, chatId);
-  } else if (data === "connect") {
-    await startConnect(env, chatId);
-    await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "🔐 Liaison de compte", reply_markup: homeKeyboard() });
   } else if (data === "create") {
     await putState(env, chatId, { step: "name", profile: {} });
     await telegram(env, "editMessageText", { chat_id: chatId, message_id: messageId, text: "🎴 Étape 1/6 — Quel est ton nom réel ? Envoie-le ici. (/cancel pour arrêter)" });
