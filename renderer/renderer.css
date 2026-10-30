@@ -1,0 +1,5 @@
+html, body, #renderer-root { margin: 0; padding: 0; width: 100%; min-height: 100%; background: #fff; }
+body { overflow: hidden; }
+#renderer-root { width: 957px; height: 536px; }
+.card-stage { width: 957px !important; height: 536px !important; }
+.card-artboard { transform: none !important; }
